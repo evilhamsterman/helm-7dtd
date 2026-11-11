@@ -1,0 +1,336 @@
+{{- $backupsEnabled := and .Values.backups (ne .Values.backups.enabled false) }}
+{{- $backupStorage := or (and .Values.storage .Values.storage.backups) (and .Values.backups .Values.backups.storage) }}
+{{- $backupStorageValid := and $backupStorage (has (default "" $backupStorage.kind) (list "persistentVolumeClaim" "hostvol" "emptyDir")) }}
+{{- if and $backupsEnabled (not $backupStorageValid) }}
+{{- fail "Backup storage is required when backups are enabled (.Values.backups.enabled is true). Please configure .Values.backups.storage with a valid kind (persistentVolumeClaim, hostvol, emptyDir) or disable backups (.Values.backups.enabled=false)." }}
+{{- end }}
+{{- $gamePort := int (default 26900 .Values.networking.gamePort) }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    7dtd/server: {{ .Release.Name }}
+    {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.podAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ .Release.Name }}
+  replicas: 1
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      7dtd/server: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        7dtd/server: {{ .Release.Name }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.useHostNetworking }}
+      hostNetwork: true
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+        env:
+        {{- if .Values.server }}
+        {{- if ne .Values.server.startMode nil }}
+        - name: START_MODE
+          value: {{ .Values.server.startMode | quote }}
+        {{- end }}
+        {{- if .Values.server.version }}
+        - name: VERSION
+          value: {{ .Values.server.version | quote }}
+        {{- end }}
+        {{- if .Values.server.timeZone }}
+        - name: TimeZone
+          value: {{ .Values.server.timeZone | quote }}
+        {{- end }}
+        {{- if ne .Values.server.puid nil }}
+        - name: PUID
+          value: {{ .Values.server.puid | quote }}
+        {{- end }}
+        {{- if ne .Values.server.pgid nil }}
+        - name: PGID
+          value: {{ .Values.server.pgid | quote }}
+        {{- end }}
+        {{- if ne .Values.server.changeConfigDirOwnership nil }}
+        - name: CHANGE_CONFIG_DIR_OWNERSHIP
+          value: {{ ternary "YES" "NO" .Values.server.changeConfigDirOwnership | quote }}
+        {{- end }}
+        {{- if .Values.server.linuxgsmVersion }}
+        - name: LINUXGSM_VERSION
+          value: {{ .Values.server.linuxgsmVersion | quote }}
+        {{- end }}
+        {{- if ne .Values.server.monitor nil }}
+        - name: MONITOR
+          value: {{ ternary "YES" "NO" .Values.server.monitor | quote }}
+        {{- end }}
+        {{- if ne .Values.server.testAlert nil }}
+        - name: TEST_ALERT
+          value: {{ ternary "YES" "NO" .Values.server.testAlert | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.mods }}
+        {{- if ne .Values.mods.updateMods nil }}
+        - name: UPDATE_MODS
+          value: {{ ternary "YES" "NO" .Values.mods.updateMods | quote }}
+        {{- end }}
+        {{- if .Values.mods.urls }}
+        - name: MODS_URLS
+          {{- if kindIs "slice" .Values.mods.urls }}
+          value: {{ join "," .Values.mods.urls | quote }}
+          {{- else }}
+          value: {{ .Values.mods.urls | quote }}
+          {{- end }}
+        {{- end }}
+        {{- if .Values.mods.allocFixes }}
+        {{- if ne .Values.mods.allocFixes.enabled nil }}
+        - name: ALLOC_FIXES
+          value: {{ ternary "YES" "NO" .Values.mods.allocFixes.enabled | quote }}
+        {{- end }}
+        {{- if ne .Values.mods.allocFixes.update nil }}
+        - name: ALLOC_FIXES_UPDATE
+          value: {{ ternary "YES" "NO" .Values.mods.allocFixes.update | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.mods.undeadLegacy }}
+        {{- if ne .Values.mods.undeadLegacy.enabled nil }}
+        - name: UNDEAD_LEGACY
+          value: {{ ternary "YES" "NO" .Values.mods.undeadLegacy.enabled | quote }}
+        {{- end }}
+        {{- if .Values.mods.undeadLegacy.version }}
+        - name: UNDEAD_LEGACY_VERSION
+          value: {{ .Values.mods.undeadLegacy.version | quote }}
+        {{- end }}
+        {{- if ne .Values.mods.undeadLegacy.update nil }}
+        - name: UNDEAD_LEGACY_UPDATE
+          value: {{ ternary "YES" "NO" .Values.mods.undeadLegacy.update | quote }}
+        {{- end }}
+        {{- if .Values.mods.undeadLegacy.url }}
+        - name: UNDEAD_LEGACY_URL
+          value: {{ .Values.mods.undeadLegacy.url | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.mods.darknessFalls }}
+        {{- if ne .Values.mods.darknessFalls.enabled nil }}
+        - name: DARKNESS_FALLS
+          value: {{ ternary "YES" "NO" .Values.mods.darknessFalls.enabled | quote }}
+        {{- end }}
+        {{- if ne .Values.mods.darknessFalls.update nil }}
+        - name: DARKNESS_FALLS_UPDATE
+          value: {{ ternary "YES" "NO" .Values.mods.darknessFalls.update | quote }}
+        {{- end }}
+        {{- if .Values.mods.darknessFalls.url }}
+        - name: DARKNESS_FALLS_URL
+          value: {{ .Values.mods.darknessFalls.url | quote }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.mods.bepinex }}
+        {{- if ne .Values.mods.bepinex.enabled nil }}
+        - name: BEPINEX
+          value: {{ ternary "YES" "NO" .Values.mods.bepinex.enabled | quote }}
+        {{- end }}
+        {{- if ne .Values.mods.bepinex.update nil }}
+        - name: BEPINEX_UPDATE
+          value: {{ ternary "YES" "NO" .Values.mods.bepinex.update | quote }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.backups }}
+        {{- if ne .Values.backups.enabled nil }}
+        - name: BACKUP
+          value: {{ ternary "YES" "NO" .Values.backups.enabled | quote }}
+        {{- end }}
+        {{- if ne .Values.backups.hour nil }}
+        - name: BACKUP_HOUR
+          value: {{ .Values.backups.hour | quote }}
+        {{- end }}
+        {{- if ne .Values.backups.max nil }}
+        - name: BACKUP_MAX
+          value: {{ .Values.backups.max | quote }}
+        {{- end }}
+        {{- end }}
+        {{- with .Values.extraEnvironmentVars }}
+        {{- range $key, $value := . }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- end }}
+        ports:
+        - name: gameport-tcp
+          containerPort: {{ $gamePort }}
+          protocol: TCP
+        - name: gameport-udp
+          containerPort: {{ $gamePort }}
+          protocol: UDP
+        - name: gameport-udp2
+          containerPort: {{ add $gamePort 1 }}
+          protocol: UDP
+        - name: gameport-udp3
+          containerPort: {{ add $gamePort 2 }}
+          protocol: UDP
+        {{- if and .Values.networking.webadmin .Values.networking.webadmin.enabled }}
+        - name: webadmin
+          containerPort: {{ default 8080 .Values.networking.webadmin.port | int }}
+          protocol: TCP
+        {{- end }}
+        {{- if and .Values.networking.telnet .Values.networking.telnet.enabled }}
+        - name: telnet
+          containerPort: {{ default 8081 .Values.networking.telnet.port | int }}
+          protocol: TCP
+        {{- end }}
+        {{- if and .Values.networking.webserver .Values.networking.webserver.enabled }}
+        - name: webserver
+          containerPort: {{ default 8082 .Values.networking.webserver.port | int }}
+          protocol: TCP
+        {{- end }}
+        volumeMounts:
+        {{- if and .Values.storage.data .Values.storage.data.kind }}
+        - mountPath: /home/sdtdserver/.local/share/7DaysToDie
+          name: gamefiles
+        {{- end }}
+        {{- if and .Values.storage.server .Values.storage.server.kind }}
+        - mountPath: /home/sdtdserver/serverfiles
+          name: serverfiles
+        {{- end }}
+        {{- if and .Values.storage.lgsmConfig .Values.storage.lgsmConfig.kind }}
+        - mountPath: /home/sdtdserver/lgsm/config-lgsm/sdtdserver
+          name: lgsmconfig
+        {{- end }}
+        {{- if and $backupsEnabled $backupStorageValid }}
+        - mountPath: /home/sdtdserver/lgsm/backup
+          name: backupfiles
+        {{- end }}
+        {{- range .Values.extraVolumes }}
+        - name: {{ .name }}
+          readOnly: {{ default true .readOnly }}
+          mountPath: {{ default (printf "/extraVolumes/%s" .name) .mountPath }}
+        {{- end }}
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.startupProbe }}
+        startupProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.readinessProbe }}
+        readinessProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.livenessProbe }}
+        livenessProbe:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      {{- if and .Values.storage.data .Values.storage.data.kind }}
+      {{- if eq .Values.storage.data.kind "hostvol" }}
+      - name: gamefiles
+        hostPath:
+          path: {{ .Values.storage.data.hostvol.path }}
+          type: DirectoryOrCreate
+      {{- else if eq .Values.storage.data.kind "persistentVolumeClaim" }}
+      - name: gamefiles
+        persistentVolumeClaim:
+          claimName: {{ default (printf "%s-world-data" .Release.Name) .Values.storage.data.pvc.existingClaim }}
+      {{- else if eq .Values.storage.data.kind "emptyDir" }}
+      - name: gamefiles
+        emptyDir: {}
+      {{- end }}
+      {{- end }}
+      {{- if and .Values.storage.server .Values.storage.server.kind }}
+      {{- if eq .Values.storage.server.kind "hostvol" }}
+      - name: serverfiles
+        hostPath:
+          path: {{ .Values.storage.server.hostvol.path }}
+          type: DirectoryOrCreate
+      {{- else if eq .Values.storage.server.kind "persistentVolumeClaim" }}
+      - name: serverfiles
+        persistentVolumeClaim:
+          claimName: {{ default (printf "%s-server-base-data" .Release.Name) .Values.storage.server.pvc.existingClaim }}
+      {{- else if eq .Values.storage.server.kind "emptyDir" }}
+      - name: serverfiles
+        emptyDir: {}
+      {{- end }}
+      {{- end }}
+      {{- if and .Values.storage.lgsmConfig .Values.storage.lgsmConfig.kind }}
+      {{- if eq .Values.storage.lgsmConfig.kind "hostvol" }}
+      - name: lgsmconfig
+        hostPath:
+          path: {{ .Values.storage.lgsmConfig.hostvol.path }}
+          type: DirectoryOrCreate
+      {{- else if eq .Values.storage.lgsmConfig.kind "persistentVolumeClaim" }}
+      - name: lgsmconfig
+        persistentVolumeClaim:
+          claimName: {{ default (printf "%s-lgsm-config" .Release.Name) .Values.storage.lgsmConfig.pvc.existingClaim }}
+      {{- else if eq .Values.storage.lgsmConfig.kind "emptyDir" }}
+      - name: lgsmconfig
+        emptyDir: {}
+      {{- end }}
+      {{- end }}
+      {{- if and $backupsEnabled $backupStorageValid }}
+      {{- if eq $backupStorage.kind "hostvol" }}
+      - name: backupfiles
+        hostPath:
+          path: {{ $backupStorage.hostvol.path }}
+          type: DirectoryOrCreate
+      {{- else if eq $backupStorage.kind "persistentVolumeClaim" }}
+      - name: backupfiles
+        persistentVolumeClaim:
+          claimName: {{ default (printf "%s-backup-data" .Release.Name) $backupStorage.pvc.existingClaim }}
+      {{- else if eq $backupStorage.kind "emptyDir" }}
+      - name: backupfiles
+        emptyDir: {}
+      {{- end }}
+      {{- end }}
+      {{- range .Values.extraVolumes }}
+      - name: {{ .name }}
+        {{ .type }}:
+          {{- if (eq .type "configMap") }}
+          name: {{ .name }}
+          {{- else if (eq .type "secret") }}
+          secretName: {{ .name }}
+          {{- if .defaultMode }}
+          defaultMode: {{ .defaultMode }}
+          {{- end }}
+          {{- end }}
+      {{- end }}

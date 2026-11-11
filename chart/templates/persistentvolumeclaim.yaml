@@ -1,0 +1,100 @@
+{{- if and .Values.storage.data (eq .Values.storage.data.kind "persistentVolumeClaim") (not .Values.storage.data.pvc.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-world-data
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.storage.data.pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.storage.data.pvc.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.storage.data.pvc.storageClassName }}
+  storageClassName: {{ .Values.storage.data.pvc.storageClassName | quote }}
+  {{- end }}
+  accessModes:
+    {{- toYaml (default (list "ReadWriteOnce") .Values.storage.data.pvc.accessModes) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.data.pvc.size }}
+{{- end }}
+{{- if and .Values.storage.server (eq .Values.storage.server.kind "persistentVolumeClaim") (not .Values.storage.server.pvc.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-server-base-data
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.storage.server.pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.storage.server.pvc.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.storage.server.pvc.storageClassName }}
+  storageClassName: {{ .Values.storage.server.pvc.storageClassName | quote }}
+  {{- end }}
+  accessModes:
+    {{- toYaml (default (list "ReadWriteOnce") .Values.storage.server.pvc.accessModes) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.server.pvc.size }}
+{{- end }}
+{{- if and .Values.storage.lgsmConfig (eq .Values.storage.lgsmConfig.kind "persistentVolumeClaim") (not .Values.storage.lgsmConfig.pvc.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-lgsm-config
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.storage.lgsmConfig.pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.storage.lgsmConfig.pvc.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.storage.lgsmConfig.pvc.storageClassName }}
+  storageClassName: {{ .Values.storage.lgsmConfig.pvc.storageClassName | quote }}
+  {{- end }}
+  accessModes:
+    {{- toYaml (default (list "ReadWriteOnce") .Values.storage.lgsmConfig.pvc.accessModes) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.lgsmConfig.pvc.size }}
+{{- end }}
+{{- $backupStorage := or (and .Values.storage .Values.storage.backups) (and .Values.backups .Values.backups.storage) }}
+{{- if and .Values.backups (ne .Values.backups.enabled false) $backupStorage (eq $backupStorage.kind "persistentVolumeClaim") (not $backupStorage.pvc.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-backup-data
+  namespace: {{ .Release.Namespace }}
+  {{- with $backupStorage.pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $backupStorage.pvc.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $backupStorage.pvc.storageClassName }}
+  storageClassName: {{ $backupStorage.pvc.storageClassName | quote }}
+  {{- end }}
+  accessModes:
+    {{- toYaml (default (list "ReadWriteOnce") $backupStorage.pvc.accessModes) | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ $backupStorage.pvc.size }}
+{{- end }}
