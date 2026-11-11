@@ -1,0 +1,191 @@
+image:
+  repository: vinanrra/7dtd-server
+  tag: v0.10.0
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Core container & LinuxGSM settings
+server:
+  # 0: install & stop, 1: start, 2: update & stop, 3: update & start, 4: backup & stop
+  startMode: 1
+  # Steam branch (e.g. "stable", "latest_experimental")
+  version: "stable"
+  timeZone: "America/New_York"
+  puid: 1000
+  pgid: 1000
+  changeConfigDirOwnership: true
+  # Override bundled LinuxGSM version only if needed (e.g. "v25.2.0")
+  linuxgsmVersion: ""
+  # Enable LinuxGSM cron monitor (*/5 * * * * sdtdserver monitor)
+  monitor: true
+  # Send test alert on server start
+  testAlert: false
+
+# Mod installation and auto-update settings
+mods:
+  # Master switch required for *_UPDATE=YES on start
+  updateMods: false
+  # Additional mod archive URLs (.zip or .rar) to download into Mods/
+  urls: []
+  allocFixes:
+    enabled: true
+    update: true
+  undeadLegacy:
+    enabled: false
+    version: "stable"
+    update: false
+    url: ""
+  darknessFalls:
+    enabled: false
+    update: false
+    url: ""
+  bepinex:
+    enabled: false
+    update: false
+
+storage:
+  # World saves, generated maps, and player profiles (mounted to /home/sdtdserver/.local/share/7DaysToDie)
+  # Note: upstream check_space.sh requires >= 12 GiB available free space on this mount
+  data:
+    kind: persistentVolumeClaim
+    pvc:
+      size: 15Gi
+      # storageClassName: ""
+      # existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+      # annotations: {}
+      # labels: {}
+    hostvol:
+      path: /data/7dtd-data
+
+  # Server installation files, sdtdserver.xml, and Mods/ (mounted to /home/sdtdserver/serverfiles)
+  server:
+    kind: persistentVolumeClaim
+    pvc:
+      size: 20Gi
+      # storageClassName: ""
+      # existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+      # annotations: {}
+      # labels: {}
+    hostvol:
+      path: /data/7dtd-server
+
+  # LinuxGSM configuration files (mounted to /home/sdtdserver/lgsm/config-lgsm/sdtdserver)
+  lgsmConfig:
+    kind: persistentVolumeClaim
+    pvc:
+      size: 1Gi
+      # storageClassName: ""
+      # existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+      # annotations: {}
+      # labels: {}
+    hostvol:
+      path: /data/7dtd-lgsm-config
+
+# Built-in LinuxGSM backup management from upstream container
+backups:
+  # Enable daily cron backups and dedicated backup volume (/home/sdtdserver/lgsm/backup)
+  enabled: true
+  # Hour of the day (0-23) when backup runs
+  hour: 5
+  # Retention period in days (passed to find -mtime +BACKUP_MAX -delete)
+  max: 7
+  # Dedicated volume for world backups (mounted to /home/sdtdserver/lgsm/backup)
+  # Required when backups.enabled is true.
+  storage:
+    kind: persistentVolumeClaim
+    pvc:
+      size: 10Gi
+      # storageClassName: ""
+      # existingClaim: ""
+      accessModes:
+        - ReadWriteOnce
+      # annotations: {}
+      # labels: {}
+    hostvol:
+      path: /data/7dtd-backups
+
+# If useHostNetworking is true, pod uses host network namespace and no Service is created
+useHostNetworking: false
+
+networking:
+  serviceType: LoadBalancer
+  # Specify load balancer class implementation (e.g., 'tailscale', 'io.cilium/node', etc.)
+  # loadBalancerClass: ""
+  # Optional static IP for LoadBalancer service
+  # loadBalancerIP: ""
+  # loadBalancerSourceRanges: []
+  # Traffic policy ('Local' or 'Cluster')
+  # externalTrafficPolicy: Local
+  gamePort: 26900
+  # Fixed base port when using serviceType: NodePort
+  # nodePort: 30900
+  # Optional management/web TCP ports
+  webadmin:
+    enabled: false
+    port: 8080
+  telnet:
+    enabled: false
+    port: 8081
+  webserver:
+    enabled: false
+    port: 8082
+  # Optional additional service annotations and labels
+  serviceAnnotations: {}
+  serviceLabels: {}
+
+resources: {}
+  # limits:
+  #   cpu: 4000m
+  #   memory: 12Gi
+  # requests:
+  #   cpu: 2000m
+  #   memory: 8Gi
+
+# Readiness probe verifies that the game server TCP port is listening and ready to accept connections
+readinessProbe:
+  tcpSocket:
+    port: gameport-tcp
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Startup probe gives the server up to 30 minutes to download Steam files (~12GB), install mods, and generate RWG worlds
+startupProbe:
+  tcpSocket:
+    port: gameport-tcp
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 120
+
+# Disabled by default because server_backup.sh temporarily stops sdtdserver while archiving worlds
+livenessProbe: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+securityContext: {}
+
+# Optional pod labels and annotations
+podLabels: {}
+podAnnotations: {}
+
+# priorityClassName: high-priority
+
+# Additional environment variables passed to the container
+# extraEnvironmentVars:
+#   CUSTOM_VAR: "value"
+
+# Extra volumes to mount (e.g., secrets or custom configs)
+# extraVolumes:
+#   - name: custom-config
+#     type: configMap
+#     mountPath: /extraVolumes/custom-config

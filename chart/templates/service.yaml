@@ -1,0 +1,80 @@
+{{- if not .Values.useHostNetworking }}
+{{- $gamePort := int (default 26900 .Values.networking.gamePort) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.networking.serviceLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.networking.serviceAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.networking.serviceType }}
+  {{- if .Values.networking.loadBalancerClass }}
+  loadBalancerClass: {{ .Values.networking.loadBalancerClass | quote }}
+  {{- end }}
+  {{- if .Values.networking.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.networking.loadBalancerIP | quote }}
+  {{- end }}
+  {{- if .Values.networking.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml .Values.networking.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
+  {{- if .Values.networking.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.networking.externalTrafficPolicy | quote }}
+  {{- end }}
+  selector:
+    7dtd/server: {{ .Release.Name }}
+  ports:
+  - name: gameport-tcp
+    port: {{ $gamePort }}
+    targetPort: gameport-tcp
+    protocol: TCP
+    {{- if and (eq .Values.networking.serviceType "NodePort") .Values.networking.nodePort }}
+    nodePort: {{ .Values.networking.nodePort | int }}
+    {{- end }}
+  - name: gameport-udp
+    port: {{ $gamePort }}
+    targetPort: gameport-udp
+    protocol: UDP
+    {{- if and (eq .Values.networking.serviceType "NodePort") .Values.networking.nodePort }}
+    nodePort: {{ .Values.networking.nodePort | int }}
+    {{- end }}
+  - name: gameport-udp2
+    port: {{ add $gamePort 1 }}
+    targetPort: gameport-udp2
+    protocol: UDP
+    {{- if and (eq .Values.networking.serviceType "NodePort") .Values.networking.nodePort }}
+    nodePort: {{ .Values.networking.nodePort | int | add 1 }}
+    {{- end }}
+  - name: gameport-udp3
+    port: {{ add $gamePort 2 }}
+    targetPort: gameport-udp3
+    protocol: UDP
+    {{- if and (eq .Values.networking.serviceType "NodePort") .Values.networking.nodePort }}
+    nodePort: {{ .Values.networking.nodePort | int | add 2 }}
+    {{- end }}
+  {{- if and .Values.networking.webadmin .Values.networking.webadmin.enabled }}
+  - name: webadmin
+    port: {{ default 8080 .Values.networking.webadmin.port | int }}
+    targetPort: webadmin
+    protocol: TCP
+  {{- end }}
+  {{- if and .Values.networking.telnet .Values.networking.telnet.enabled }}
+  - name: telnet
+    port: {{ default 8081 .Values.networking.telnet.port | int }}
+    targetPort: telnet
+    protocol: TCP
+  {{- end }}
+  {{- if and .Values.networking.webserver .Values.networking.webserver.enabled }}
+  - name: webserver
+    port: {{ default 8082 .Values.networking.webserver.port | int }}
+    targetPort: webserver
+    protocol: TCP
+  {{- end }}
+{{- end }}

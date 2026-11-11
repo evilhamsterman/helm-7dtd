@@ -1,0 +1,67 @@
+name: Release Helm Chart (OCI)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: latest
+
+      - name: Set up Task
+        uses: go-task/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: Set up Crane
+        uses: imjasonh/setup-crane@v0.7
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | task login OWNER="${{ github.actor }}" -- --password-stdin
+
+      - name: Publish OCI Chart to GHCR
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          if [ -n "${VERSION}" ]; then
+            task publish OWNER="${{ github.repository_owner }}" VERSION="${VERSION}"
+          else
+            task publish OWNER="${{ github.repository_owner }}"
+          fi
+
+      - name: Tag OCI Chart as latest
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io -u "${{ github.actor }}" --password-stdin
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          if [ -n "${VERSION}" ]; then
+            task tag OWNER="${{ github.repository_owner }}" VERSION="${VERSION}" TAG=latest
+          else
+            task tag OWNER="${{ github.repository_owner }}" TAG=latest
+          fi
+
+      - name: Update git latest tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "${TAG}" ]; then
+            TAG="v$(cat version)"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -fa latest -m "Release ${TAG}" "${TAG}"
+          git push origin latest --force
