@@ -17,7 +17,7 @@ Kubernetes Helm chart for deploying a dedicated [7 Days to Die](https://7daystod
 
 ```bash
 helm install 7dtd-server oci://ghcr.io/evilhamsterman/helm-7dtd \
-  --version 1.0.0 \
+  --version 1.1.0 \
   --set server.timeZone="America/Los_Angeles"
 ```
 
@@ -44,7 +44,7 @@ spec:
   chart:
     spec:
       chart: helm-7dtd
-      version: "1.0.0"
+      version: "1.1.0"
       sourceRef:
         kind: HelmRepository
         name: evilhamsterman-charts
@@ -75,6 +75,28 @@ spec:
 | `server.linuxgsmVersion` | Override bundled LinuxGSM tag/branch if non-empty | `""` |
 | `server.monitor` | Enable LinuxGSM 5-minute crash monitor cron | `true` |
 | `server.testAlert` | Send LinuxGSM test alert on server startup | `false` |
+
+### Server Configuration (`sdtdserver.xml`)
+
+`serverConfig` renders `/home/sdtdserver/serverfiles/sdtdserver.xml` via an `initContainer`. See the [7 Days to Die Dedicated Server Wiki](https://developer.valvesoftware.com/wiki/7_Days_to_Die_Dedicated_Server) for property details.
+
+- **Inherited Defaults**: `ServerName` defaults to `.Release.Name`. `ServerPort`, `WebDashboardEnabled`, `WebDashboardPort`, `TelnetEnabled`, and `TelnetPort` default to the corresponding `networking.*` values. Overriding a port in `serverConfig` updates `sdtdserver.xml` and the pod `containerPort`, while `Service` ports remain driven by `networking.*`.
+- **Passwords**: Set `ServerPassword` / `TelnetPassword` directly in values (chart creates a `{{ .Release.Name }}-serverconfig` `Secret`) or reference an existing `Secret` via `ServerPasswordSecret` / `TelnetPasswordSecret` (`name` and `key`).
+
+| Section | Properties |
+|:---|:---|
+| `serverConfig.serverRepresentation` | `ServerName`, `ServerDescription`, `ServerWebsiteURL`, `ServerPassword`, `ServerPasswordSecret.{name,key}`, `ServerLoginConfirmationText`, `Region`, `Language` |
+| `serverConfig.networking` | `ServerPort`, `ServerVisibility`, `ServerDisabledNetworkProtocols`, `ServerMaxWorldTransferSpeedKiBs` |
+| `serverConfig.slots` | `ServerMaxPlayerCount`, `ServerReservedSlots`, `ServerReservedSlotsPermission`, `ServerAdminSlots`, `ServerAdminSlotsPermission` |
+| `serverConfig.adminInterfaces` | `WebDashboardEnabled`, `WebDashboardPort`, `WebDashboardUrl`, `EnableMapRendering`, `TelnetEnabled`, `TelnetPort`, `TelnetPassword`, `TelnetPasswordSecret.{name,key}`, `TelnetFailedLoginLimit`, `TelnetFailedLoginsBlocktime`, `TerminalWindowEnabled` |
+| `serverConfig.folderAndFileLocations` | `AdminFileName`, `UserDataFolder` |
+| `serverConfig.otherTechnicalSettings` | `ServerAllowCrossplay`, `EACEnabled`, `IgnoreEOSSanctions`, `HideCommandExecutionLog`, `MaxUncoveredMapChunksPerPlayer`, `PersistentPlayerProfiles`, `MaxChunkAge`, `SaveDataLimit` |
+| `serverConfig.world` | `GameWorld`, `WorldGenSeed`, `WorldGenSize`, `GameName`, `GameMode` |
+| `serverConfig.difficulty` | `PlayerSafeZoneLevel`, `PlayerSafeZoneHours` |
+| `serverConfig.gameRules` | `BuildCreate`, `BedrollDeadZoneSize`, `BedrollExpiryTime`, `AllowSpawnNearFriend`, `CameraRestrictionMode` |
+| `serverConfig.performanceRelated` | `MaxSpawnedZombies`, `MaxSpawnedAnimals`, `ServerMaxAllowedViewDistance`, `MaxQueuedMeshLayers` |
+| `serverConfig.multiplayer` | `PartySharedKillRange`, `PlayerKillingMode` |
+| `serverConfig.landClaimOptions` | `LandClaimCount`, `LandClaimSize`, `LandClaimDeadZone`, `LandClaimExpiryTime`, `LandClaimDecayMode`, `LandClaimOnlineDurabilityModifier`, `LandClaimOfflineDurabilityModifier`, `LandClaimOfflineDelay`, `DynamicMeshEnabled`, `DynamicMeshLandClaimOnly`, `DynamicMeshLandClaimBuffer`, `DynamicMeshMaxItemCache`, `TwitchServerPermission`, `TwitchBloodMoonAllowed`, `SandboxCode` |
 
 ### Mods
 

@@ -3,7 +3,7 @@ name: helm-7dtd
 description: Kubernetes Helm chart for deploying a dedicated 7 Days to Die game server with PVC persistence and automated backups
 icon: https://user-images.githubusercontent.com/6136865/29045114-9ae8e510-7bc2-11e7-8487-19552001aafd.png
 type: application
-version: 1.0.0
+version: 1.1.0
 appVersion: "v0.10.0"
 home: https://github.com/evilhamsterman/helm-7dtd
 sources:

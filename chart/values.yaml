@@ -22,6 +22,117 @@ server:
   # Send test alert on server start
   testAlert: false
 
+# 7 Days to Die sdtdserver.xml configuration
+# Documentation: https://developer.valvesoftware.com/wiki/7_Days_to_Die_Dedicated_Server
+serverConfig:
+  # GENERAL SERVER SETTINGS
+  serverRepresentation:
+    # Defaults to .Release.Name when empty
+    ServerName: ""
+    ServerDescription: "A 7 Days to Die server"
+    ServerWebsiteURL: ""
+    # Provide password directly (creates a chart Secret) or reference an existing Secret via ServerPasswordSecret
+    ServerPassword: ""
+    ServerPasswordSecret:
+      name: ""
+      key: ""
+    ServerLoginConfirmationText: ""
+    Region: "NorthAmericaEast"
+    Language: "English"
+
+  networking:
+    # Defaults to networking.gamePort when unset; if set, overrides pod containerPort and sdtdserver.xml while Service uses networking.gamePort
+    # ServerPort: 26900
+    ServerVisibility: 2
+    ServerDisabledNetworkProtocols: "SteamNetworking"
+    ServerMaxWorldTransferSpeedKiBs: 512
+
+  slots:
+    ServerMaxPlayerCount: 8
+    ServerReservedSlots: 0
+    ServerReservedSlotsPermission: 100
+    ServerAdminSlots: 0
+    ServerAdminSlotsPermission: 0
+
+  adminInterfaces:
+    # Defaults to networking.webadmin.enabled and networking.webadmin.port when unset
+    # WebDashboardEnabled: false
+    # WebDashboardPort: 8080
+    WebDashboardUrl: ""
+    EnableMapRendering: false
+    # Defaults to networking.telnet.enabled and networking.telnet.port when unset
+    # TelnetEnabled: false
+    # TelnetPort: 8081
+    # Provide password directly (creates a chart Secret) or reference an existing Secret via TelnetPasswordSecret
+    TelnetPassword: ""
+    TelnetPasswordSecret:
+      name: ""
+      key: ""
+    TelnetFailedLoginLimit: 10
+    TelnetFailedLoginsBlocktime: 10
+    TerminalWindowEnabled: true
+
+  folderAndFileLocations:
+    AdminFileName: "serveradmin.xml"
+    # Kept commented out in sdtdserver.xml when empty
+    UserDataFolder: ""
+
+  otherTechnicalSettings:
+    ServerAllowCrossplay: false
+    EACEnabled: true
+    IgnoreEOSSanctions: false
+    HideCommandExecutionLog: 0
+    MaxUncoveredMapChunksPerPlayer: 131072
+    PersistentPlayerProfiles: false
+    MaxChunkAge: -1
+    SaveDataLimit: -1
+
+  # GAMEPLAY
+  world:
+    GameWorld: "Navezgane"
+    WorldGenSeed: "MyGame"
+    WorldGenSize: 6144
+    GameName: "MyGame"
+    GameMode: "GameModeSurvival"
+
+  difficulty:
+    PlayerSafeZoneLevel: 5
+    PlayerSafeZoneHours: 5
+
+  gameRules:
+    BuildCreate: false
+    BedrollDeadZoneSize: 15
+    BedrollExpiryTime: 45
+    AllowSpawnNearFriend: 2
+    CameraRestrictionMode: 0
+
+  performanceRelated:
+    MaxSpawnedZombies: 64
+    MaxSpawnedAnimals: 50
+    ServerMaxAllowedViewDistance: 12
+    MaxQueuedMeshLayers: 1000
+
+  multiplayer:
+    PartySharedKillRange: 100
+    PlayerKillingMode: 3
+
+  landClaimOptions:
+    LandClaimCount: 5
+    LandClaimSize: 41
+    LandClaimDeadZone: 30
+    LandClaimExpiryTime: 7
+    LandClaimDecayMode: 0
+    LandClaimOnlineDurabilityModifier: 4
+    LandClaimOfflineDurabilityModifier: 4
+    LandClaimOfflineDelay: 0
+    DynamicMeshEnabled: true
+    DynamicMeshLandClaimOnly: true
+    DynamicMeshLandClaimBuffer: 3
+    DynamicMeshMaxItemCache: 3
+    TwitchServerPermission: 90
+    TwitchBloodMoonAllowed: false
+    SandboxCode: "AAAJABJACJADJARFBNC"
+
 # Mod installation and auto-update settings
 mods:
   # Master switch required for *_UPDATE=YES on start

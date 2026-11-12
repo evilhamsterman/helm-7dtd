@@ -11,7 +11,9 @@ Instructions and context for AI coding agents working in the `helm-7dtd` reposit
 
 ## Chart Architecture & Templates
 
-- **`chart/templates/statefulset.yaml`**: Deploys the server as a single-replica `StatefulSet` with `RollingUpdate` strategy to guarantee single-pod access to RWO storage and stable network identity.
+- **`chart/templates/statefulset.yaml`**: Deploys the server as a single-replica `StatefulSet` with `RollingUpdate` strategy to guarantee single-pod access to RWO storage and stable network identity. Includes an `initContainer` (`generate-sdtdserver-xml`) reusing the main server image to render `/home/sdtdserver/serverfiles/sdtdserver.xml` from `.Values.serverConfig` and inject passwords from Kubernetes Secrets.
+- **`chart/templates/secret.yaml`**: Creates an `Opaque` `Secret` (`{{ .Release.Name }}-serverconfig`) when `ServerPassword` or `TelnetPassword` are provided directly in `.Values.serverConfig` rather than via `*PasswordSecret` references.
+- **`chart/templates/_helpers.tpl`**: Template helper (`helm-7dtd.xmlEscape`) for escaping XML attribute values.
 - **`chart/templates/persistentvolumeclaim.yaml`**: Creates PersistentVolumeClaims for:
   - World data & saves: `/home/sdtdserver/.local/share/7DaysToDie` (`{{ .Release.Name }}-world-data`, minimum 12 GiB free space required by upstream `check_space.sh`)
   - Server installation & config (`sdtdserver.xml`, `Mods/`): `/home/sdtdserver/serverfiles` (`{{ .Release.Name }}-server-base-data`)

@@ -4,7 +4,55 @@
 {{- if and $backupsEnabled (not $backupStorageValid) }}
 {{- fail "Backup storage is required when backups are enabled (.Values.backups.enabled is true). Please configure .Values.backups.storage with a valid kind (persistentVolumeClaim, hostvol, emptyDir) or disable backups (.Values.backups.enabled=false)." }}
 {{- end }}
-{{- $gamePort := int (default 26900 .Values.networking.gamePort) }}
+{{- $sc := default dict .Values.serverConfig }}
+{{- $rep := default dict $sc.serverRepresentation }}
+{{- $scNet := default dict $sc.networking }}
+{{- $slots := default dict $sc.slots }}
+{{- $admin := default dict $sc.adminInterfaces }}
+{{- $locations := default dict $sc.folderAndFileLocations }}
+{{- $tech := default dict $sc.otherTechnicalSettings }}
+{{- $world := default dict $sc.world }}
+{{- $difficulty := default dict $sc.difficulty }}
+{{- $rules := default dict $sc.gameRules }}
+{{- $perf := default dict $sc.performanceRelated }}
+{{- $mp := default dict $sc.multiplayer }}
+{{- $land := default dict $sc.landClaimOptions }}
+{{- $net := default dict .Values.networking }}
+{{- $netWebadmin := default dict $net.webadmin }}
+{{- $netTelnet := default dict $net.telnet }}
+{{- $netWebserver := default dict $net.webserver }}
+{{- $gamePort := int (default 26900 $net.gamePort) }}
+{{- $serverPort := int (default $gamePort $scNet.ServerPort) }}
+{{- $webDashboardEnabled := false }}
+{{- if ne $admin.WebDashboardEnabled nil }}
+{{- $webDashboardEnabled = $admin.WebDashboardEnabled }}
+{{- else if ne $netWebadmin.enabled nil }}
+{{- $webDashboardEnabled = $netWebadmin.enabled }}
+{{- end }}
+{{- $webDashboardPort := int (default (default 8080 $netWebadmin.port) $admin.WebDashboardPort) }}
+{{- $telnetEnabled := false }}
+{{- if ne $admin.TelnetEnabled nil }}
+{{- $telnetEnabled = $admin.TelnetEnabled }}
+{{- else if ne $netTelnet.enabled nil }}
+{{- $telnetEnabled = $netTelnet.enabled }}
+{{- end }}
+{{- $telnetPort := int (default (default 8081 $netTelnet.port) $admin.TelnetPort) }}
+{{- $serverSecretRef := default dict $rep.ServerPasswordSecret }}
+{{- $telnetSecretRef := default dict $admin.TelnetPasswordSecret }}
+{{- if and $serverSecretRef.name (not $serverSecretRef.key) }}
+{{- fail "serverConfig.serverRepresentation.ServerPasswordSecret.key is required when ServerPasswordSecret.name is set." }}
+{{- end }}
+{{- if and $telnetSecretRef.name (not $telnetSecretRef.key) }}
+{{- fail "serverConfig.adminInterfaces.TelnetPasswordSecret.key is required when TelnetPasswordSecret.name is set." }}
+{{- end }}
+{{- $hasInlineServerPassword := and (not $serverSecretRef.name) (ne (default "" $rep.ServerPassword) "") }}
+{{- $hasInlineTelnetPassword := and (not $telnetSecretRef.name) (ne (default "" $admin.TelnetPassword) "") }}
+{{- $puid := 1000 }}
+{{- $pgid := 1000 }}
+{{- if .Values.server }}
+{{- if ne .Values.server.puid nil }}{{- $puid = int .Values.server.puid }}{{- end }}
+{{- if ne .Values.server.pgid nil }}{{- $pgid = int .Values.server.pgid }}{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -66,6 +114,178 @@ spec:
       {{- if .Values.useHostNetworking }}
       hostNetwork: true
       {{- end }}
+      initContainers:
+      - name: generate-sdtdserver-xml
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+        {{- if or $serverSecretRef.name $hasInlineServerPassword $telnetSecretRef.name $hasInlineTelnetPassword }}
+        env:
+        {{- if $serverSecretRef.name }}
+        - name: SERVER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $serverSecretRef.name }}
+              key: {{ $serverSecretRef.key }}
+        {{- else if $hasInlineServerPassword }}
+        - name: SERVER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ printf "%s-serverconfig" .Release.Name }}
+              key: ServerPassword
+        {{- end }}
+        {{- if $telnetSecretRef.name }}
+        - name: TELNET_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ $telnetSecretRef.name }}
+              key: {{ $telnetSecretRef.key }}
+        {{- else if $hasInlineTelnetPassword }}
+        - name: TELNET_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ printf "%s-serverconfig" .Release.Name }}
+              key: TelnetPassword
+        {{- end }}
+        {{- end }}
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          escape_xml() {
+            printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
+          }
+          SERVER_PASSWORD_XML="$(escape_xml "${SERVER_PASSWORD:-}")"
+          TELNET_PASSWORD_XML="$(escape_xml "${TELNET_PASSWORD:-}")"
+          mkdir -p /home/sdtdserver/serverfiles
+          {
+            cat <<'EOF'
+          <?xml version="1.0"?>
+          <ServerSettings>
+          	<!-- GENERAL SERVER SETTINGS -->
+          	<!-- Documentation: https://developer.valvesoftware.com/wiki/7_Days_to_Die_Dedicated_Server -->
+
+          	<!-- Server representation -->
+          	<property name="ServerName"						value="{{ include "helm-7dtd.xmlEscape" (default .Release.Name $rep.ServerName) }}"/>		<!-- Whatever you want the name of the server to be. -->
+          	<property name="ServerDescription"				value="{{ if ne $rep.ServerDescription nil }}{{ include "helm-7dtd.xmlEscape" $rep.ServerDescription }}{{ else }}A 7 Days to Die server{{ end }}"/>	<!-- Whatever you want the server description to be, will be shown in the server browser. -->
+          	<property name="ServerWebsiteURL"				value="{{ include "helm-7dtd.xmlEscape" (default "" $rep.ServerWebsiteURL) }}"/>					<!-- Website URL for the server, will be shown in the server browser as a clickable link -->
+          EOF
+            printf '\t<property name="ServerPassword"\t\t\t\t\tvalue="%s"/>\t\t\t\t\t<!-- Password to gain entry to the server -->\n' "$SERVER_PASSWORD_XML"
+            cat <<'EOF'
+          	<property name="ServerLoginConfirmationText"	value="{{ include "helm-7dtd.xmlEscape" (default "" $rep.ServerLoginConfirmationText) }}"/>					<!-- If set the user will see the message during joining the server and has to confirm it before continuing. For more complex changes to this window you can change the "serverjoinrulesdialog" window in XUi -->
+          	<property name="Region"							value="{{ include "helm-7dtd.xmlEscape" (default "NorthAmericaEast" $rep.Region) }}"/>	<!-- The region this server is in. Values: NorthAmericaEast, NorthAmericaWest, CentralAmerica, SouthAmerica, Europe, Russia, Asia, MiddleEast, Africa, Oceania -->
+          	<property name="Language"						value="{{ include "helm-7dtd.xmlEscape" (default "English" $rep.Language) }}"/>			<!-- Primary language for players on this server. Values: Use any language name that you would users expect to search for. Should be the English name of the language, e.g. not "Deutsch" but "German" -->
+
+          	<!-- Networking -->
+          	<property name="ServerPort"						value="{{ $serverPort }}"/>				<!-- Port you want the server to listen on. Keep it in the ranges 26900 to 26905 or 27015 to 27020 if you want PCs on the same LAN to find it as a LAN server. -->
+          	<property name="ServerVisibility"				value="{{ if ne $scNet.ServerVisibility nil }}{{ $scNet.ServerVisibility }}{{ else }}2{{ end }}"/>					<!-- Visibility of this server: 2 = public, 1 = only shown to friends, 0 = not listed. As you are never friend of a dedicated server setting this to "1" will only work when the first player connects manually by IP. -->
+          	<property name="ServerDisabledNetworkProtocols"	value="{{ if ne $scNet.ServerDisabledNetworkProtocols nil }}{{ include "helm-7dtd.xmlEscape" $scNet.ServerDisabledNetworkProtocols }}{{ else }}SteamNetworking{{ end }}"/>	<!-- Networking protocols that should not be used. Separated by comma. Possible values: LiteNetLib, SteamNetworking. Dedicated servers should disable SteamNetworking if there is no NAT router in between your users and the server or when port-forwarding is set up correctly -->
+          	<property name="ServerMaxWorldTransferSpeedKiBs" value="{{ if ne $scNet.ServerMaxWorldTransferSpeedKiBs nil }}{{ $scNet.ServerMaxWorldTransferSpeedKiBs }}{{ else }}512{{ end }}"/>				<!-- Maximum (!) speed in kiB/s the world is transferred at to a client on first connect if it does not have the world yet. Maximum is about 1300 kiB/s, even if you set a higher value. -->
+
+          	<!-- Slots -->
+          	<property name="ServerMaxPlayerCount"			value="{{ if ne $slots.ServerMaxPlayerCount nil }}{{ $slots.ServerMaxPlayerCount }}{{ else }}8{{ end }}"/>					<!-- Maximum Concurrent Players -->
+          	<property name="ServerReservedSlots"			value="{{ if ne $slots.ServerReservedSlots nil }}{{ $slots.ServerReservedSlots }}{{ else }}0{{ end }}"/>					<!-- Out of the MaxPlayerCount this many slots can only be used by players with a specific permission level -->
+          	<property name="ServerReservedSlotsPermission"	value="{{ if ne $slots.ServerReservedSlotsPermission nil }}{{ $slots.ServerReservedSlotsPermission }}{{ else }}100{{ end }}"/>				<!-- Required permission level to use reserved slots above -->
+          	<property name="ServerAdminSlots"				value="{{ if ne $slots.ServerAdminSlots nil }}{{ $slots.ServerAdminSlots }}{{ else }}0{{ end }}"/>					<!-- This many admins can still join even if the server has reached MaxPlayerCount -->
+          	<property name="ServerAdminSlotsPermission"		value="{{ if ne $slots.ServerAdminSlotsPermission nil }}{{ $slots.ServerAdminSlotsPermission }}{{ else }}0{{ end }}"/>					<!-- Required permission level to use the admin slots above -->
+
+          	<!-- Admin interfaces -->
+          	<property name="WebDashboardEnabled"			value="{{ $webDashboardEnabled }}"/>				<!-- Enable/disable the web dashboard -->
+          	<property name="WebDashboardPort"				value="{{ $webDashboardPort }}"/>				<!-- Port of the web dashboard -->
+          	<property name="WebDashboardUrl"				value="{{ include "helm-7dtd.xmlEscape" (default "" $admin.WebDashboardUrl) }}"/>					<!-- External URL to the web dashboard if not just using the public IP of the server, e.g. if the web dashboard is behind a reverse proxy. Needs to be the full URL, like "https://domainOfReverseProxy.tld:1234/". Can be left empty if directly using the public IP and dashboard port -->
+          	<property name="EnableMapRendering"				value="{{ if ne $admin.EnableMapRendering nil }}{{ $admin.EnableMapRendering }}{{ else }}false{{ end }}"/>				<!-- Enable/disable rendering of the map to tile images while exploring it. This is used e.g. by the web dashboard to display a view of the map. -->
+
+          	<property name="TelnetEnabled"					value="{{ $telnetEnabled }}"/>				<!-- Enable/Disable the telnet -->
+          	<property name="TelnetPort"						value="{{ $telnetPort }}"/>				<!-- Port of the telnet server -->
+          EOF
+            printf '\t<property name="TelnetPassword"\t\t\t\t\tvalue="%s"/>\t\t\t\t\t<!-- Password to gain entry to telnet interface. If no password is set the server will only listen on the local loopback interface -->\n' "$TELNET_PASSWORD_XML"
+            cat <<'EOF'
+          	<property name="TelnetFailedLoginLimit"			value="{{ if ne $admin.TelnetFailedLoginLimit nil }}{{ $admin.TelnetFailedLoginLimit }}{{ else }}10{{ end }}"/>				<!-- After this many wrong passwords from a single remote client the client will be blocked from connecting to the Telnet interface -->
+          	<property name="TelnetFailedLoginsBlocktime"	value="{{ if ne $admin.TelnetFailedLoginsBlocktime nil }}{{ $admin.TelnetFailedLoginsBlocktime }}{{ else }}10{{ end }}"/>				<!-- How long will the block persist (in seconds) -->
+
+          	<property name="TerminalWindowEnabled"			value="{{ if ne $admin.TerminalWindowEnabled nil }}{{ $admin.TerminalWindowEnabled }}{{ else }}true{{ end }}"/>				<!-- Show a terminal window for log output / command input (Windows only) -->
+
+          	<!-- Folder and file locations -->
+          	<property name="AdminFileName"					value="{{ include "helm-7dtd.xmlEscape" (default "serveradmin.xml" $locations.AdminFileName) }}"/>	<!-- Server admin file name. Path relative to UserDataFolder/Saves -->
+          {{- if $locations.UserDataFolder }}
+          	<property name="UserDataFolder"					value="{{ include "helm-7dtd.xmlEscape" $locations.UserDataFolder }}"/>	<!-- Use this to override where the server stores all user data, including RWG generated worlds and saves. -->
+          {{- else }}
+          	<!-- <property name="UserDataFolder"			value="absolute_path"/> -->	<!-- Use this to override where the server stores all user data, including RWG generated worlds and saves. Do not forget to uncomment the entry! -->
+          {{- end }}
+
+          	<!-- Other technical settings -->
+          	<property name="ServerAllowCrossplay"			value="{{ if ne $tech.ServerAllowCrossplay nil }}{{ $tech.ServerAllowCrossplay }}{{ else }}false{{ end }}"/>				<!-- Enables/Disables crossplay, crossplay servers will only be found in searches and joinable if sanctions are not ignored, and have a default or fewer player slot count  -->
+          	<property name="EACEnabled"						value="{{ if ne $tech.EACEnabled nil }}{{ $tech.EACEnabled }}{{ else }}true{{ end }}"/>				<!-- Enables/Disables EasyAntiCheat -->
+          	<property name="IgnoreEOSSanctions"				value="{{ if ne $tech.IgnoreEOSSanctions nil }}{{ $tech.IgnoreEOSSanctions }}{{ else }}false{{ end }}"/>				<!-- Ignore EOS sanctions when allowing players to join -->
+          	<property name="HideCommandExecutionLog"		value="{{ if ne $tech.HideCommandExecutionLog nil }}{{ $tech.HideCommandExecutionLog }}{{ else }}0{{ end }}"/>					<!-- Hide logging of command execution. 0 = show everything, 1 = hide only from Telnet/ControlPanel, 2 = also hide from remote game clients, 3 = hide everything -->
+          	<property name="MaxUncoveredMapChunksPerPlayer"	value="{{ if ne $tech.MaxUncoveredMapChunksPerPlayer nil }}{{ $tech.MaxUncoveredMapChunksPerPlayer }}{{ else }}131072{{ end }}"/>			<!-- Override how many chunks can be uncovered on the in-game map by each player. Resulting max map file size limit per player is (x * 512 Bytes), uncovered area is (x * 256 m²). Default 131072 means max 32 km² can be uncovered at any time -->
+          	<property name="PersistentPlayerProfiles"		value="{{ if ne $tech.PersistentPlayerProfiles nil }}{{ $tech.PersistentPlayerProfiles }}{{ else }}false{{ end }}"/>				<!-- If disabled a player can join with any selected profile. If true they will join with the last profile they joined with -->
+          	<property name="MaxChunkAge"					value="{{ if ne $tech.MaxChunkAge nil }}{{ $tech.MaxChunkAge }}{{ else }}-1{{ end }}"/>				<!-- The number of in-game days which must pass since visiting a chunk before it will reset to its original state if not revisited or protected (e.g. by a land claim or bedroll being in close proximity). -->
+          	<property name="SaveDataLimit"					value="{{ if ne $tech.SaveDataLimit nil }}{{ $tech.SaveDataLimit }}{{ else }}-1{{ end }}"/>				<!-- The maximum disk space allowance for each saved game in megabytes (MB). Saved chunks may be forcibly reset to their original states to free up space when this limit is reached. Negative values disable the limit. -->
+
+          	<!-- GAMEPLAY -->
+
+          	<!-- World -->
+          	<property name="GameWorld"						value="{{ include "helm-7dtd.xmlEscape" (default "Navezgane" $world.GameWorld) }}"/>			<!-- "RWG" (see WorldGenSeed and WorldGenSize options below) or any already existing world name in the Worlds folder (currently shipping with e.g. "Navezgane", "Pregen06k01", "Pregen06k02", "Pregen08k01", "Pregen08k02", ...) -->
+          	<property name="WorldGenSeed"					value="{{ include "helm-7dtd.xmlEscape" (default "MyGame" $world.WorldGenSeed) }}"/>			<!-- If RWG this is the seed for the generation of the new world. If a world with the resulting name already exists it will simply load it -->
+          	<property name="WorldGenSize"					value="{{ if ne $world.WorldGenSize nil }}{{ $world.WorldGenSize }}{{ else }}6144{{ end }}"/>				<!-- 6144, 8192, 10240 If GameWorld = RWG, this controls the width and height of the created world. Officially supported sizes are between 6144 and 10240 and must be a multiple of 2048, e.g. 6144, 8192, 10240. -->
+          	<property name="GameName"						value="{{ if ne $world.GameName nil }}{{ include "helm-7dtd.xmlEscape" $world.GameName }}{{ else }}MyGame{{ end }}"/>			<!-- Whatever you want the game name to be (allowed [A-Za-z0-9_-. ]). This affects the save game name as well as the seed used when placing decoration (trees etc.) in the world. It does not control the generic layout of the world if creating an RWG world -->
+          	<property name="GameMode"						value="{{ if ne $world.GameMode nil }}{{ include "helm-7dtd.xmlEscape" $world.GameMode }}{{ else }}GameModeSurvival{{ end }}"/>	<!-- GameModeSurvival -->
+
+          	<!-- Difficulty -->
+          	<property name="PlayerSafeZoneLevel"			value="{{ if ne $difficulty.PlayerSafeZoneLevel nil }}{{ $difficulty.PlayerSafeZoneLevel }}{{ else }}5{{ end }}"/>					<!-- If a player is less or equal this level he will create a safe zone (no enemies) when spawned -->
+          	<property name="PlayerSafeZoneHours"			value="{{ if ne $difficulty.PlayerSafeZoneHours nil }}{{ $difficulty.PlayerSafeZoneHours }}{{ else }}5{{ end }}"/>					<!-- Hours in world time this safe zone exists -->
+
+          	<!-- Game Rules -->
+          	<property name="BuildCreate"					value="{{ if ne $rules.BuildCreate nil }}{{ $rules.BuildCreate }}{{ else }}false{{ end }}"/>				<!-- cheat mode on/off -->
+          	<property name="BedrollDeadZoneSize"			value="{{ if ne $rules.BedrollDeadZoneSize nil }}{{ $rules.BedrollDeadZoneSize }}{{ else }}15{{ end }}"/>				<!-- Size (box "radius", so a box with 2 times the given value for each side's length) of bedroll dead zone, no zombies will spawn inside this area, and any cleared sleeper volumes that touch a bedroll deadzone will not spawn after they've been cleared. -->
+          	<property name="BedrollExpiryTime"				value="{{ if ne $rules.BedrollExpiryTime nil }}{{ $rules.BedrollExpiryTime }}{{ else }}45{{ end }}"/>				<!-- Number of real world days a bedroll stays active after owner was last online -->
+          	<property name="AllowSpawnNearFriend"			value="{{ if ne $rules.AllowSpawnNearFriend nil }}{{ $rules.AllowSpawnNearFriend }}{{ else }}2{{ end }}"/>					<!-- Can new players joining the server for the first time select to join near any friend playing at the same time? 0 = Disabled, 1 = Always, 2 = Only near friends in forest biome -->
+          	<property name="CameraRestrictionMode"			value="{{ if ne $rules.CameraRestrictionMode nil }}{{ $rules.CameraRestrictionMode }}{{ else }}0{{ end }}"/>					<!-- 0 = Players can freely swap between first and third person camera modes, 1 = Restricted to first person, 2 = Restricted to third person -->
+
+          	<!-- Performance related -->
+          	<property name="MaxSpawnedZombies"				value="{{ if ne $perf.MaxSpawnedZombies nil }}{{ $perf.MaxSpawnedZombies }}{{ else }}64{{ end }}" />				<!-- This count covers the entire world. It is scaled based on use case (x1.9 blood moons, x2.1 sleepers). Changing this setting can have a huge impact on performance. -->
+          	<property name="MaxSpawnedAnimals"				value="{{ if ne $perf.MaxSpawnedAnimals nil }}{{ $perf.MaxSpawnedAnimals }}{{ else }}50{{ end }}" />				<!-- If your server has a large number of players you can increase this limit to add more wildlife. Animals don't consume as much CPU as zombies. NOTE: That this doesn't cause more animals to spawn arbitrarily: The biome spawning system only spawns a certain number of animals in a		given area, but if you have lots of players that are all spread out then you may be hitting the limit and can increase it. -->
+          	<property name="ServerMaxAllowedViewDistance"	value="{{ if ne $perf.ServerMaxAllowedViewDistance nil }}{{ $perf.ServerMaxAllowedViewDistance }}{{ else }}12{{ end }}" />				<!-- Max view distance a client may request (6 - 12). High impact on memory usage and performance. -->
+          	<property name="MaxQueuedMeshLayers"			value="{{ if ne $perf.MaxQueuedMeshLayers nil }}{{ $perf.MaxQueuedMeshLayers }}{{ else }}1000{{ end }}" />				<!-- Maximum amount of Chunk mesh layers that can be enqueued during mesh generation. Reducing this will improve memory usage but may increase Chunk generation time -->
+
+          	<!-- Multiplayer -->
+          	<property name="PartySharedKillRange"			value="{{ if ne $mp.PartySharedKillRange nil }}{{ $mp.PartySharedKillRange }}{{ else }}100{{ end }}"/>				<!-- The distance you must be within to receive party shared kill XP and quest party kill objective credit. -->
+          	<property name="PlayerKillingMode"				value="{{ if ne $mp.PlayerKillingMode nil }}{{ $mp.PlayerKillingMode }}{{ else }}3{{ end }}"/>					<!-- Player Killing Settings (0 = No Killing, 1 = Kill Allies Only, 2 = Kill Strangers Only, 3 = Kill Everyone) -->
+
+          	<!-- Land claim options -->
+          	<property name="LandClaimCount"					value="{{ if ne $land.LandClaimCount nil }}{{ $land.LandClaimCount }}{{ else }}5{{ end }}"/>					<!-- Maximum allowed land claims per player. -->
+          	<property name="LandClaimSize"					value="{{ if ne $land.LandClaimSize nil }}{{ $land.LandClaimSize }}{{ else }}41{{ end }}"/>				<!-- Size in blocks that is protected by a keystone -->
+          	<property name="LandClaimDeadZone"				value="{{ if ne $land.LandClaimDeadZone nil }}{{ $land.LandClaimDeadZone }}{{ else }}30{{ end }}"/>				<!-- Keystones must be this many blocks apart (unless you are friends with the other player) -->
+          	<property name="LandClaimExpiryTime"			value="{{ if ne $land.LandClaimExpiryTime nil }}{{ $land.LandClaimExpiryTime }}{{ else }}7{{ end }}"/>				<!-- The number of real world days a player can be offline before their claims expire and are no longer protected -->
+          	<property name="LandClaimDecayMode"				value="{{ if ne $land.LandClaimDecayMode nil }}{{ $land.LandClaimDecayMode }}{{ else }}0{{ end }}"/>					<!-- Controls how offline players land claims decay. 0=Slow (Linear) , 1=Fast (Exponential), 2=None (Full protection until claim is expired). -->
+          	<property name="LandClaimOnlineDurabilityModifier"	value="{{ if ne $land.LandClaimOnlineDurabilityModifier nil }}{{ $land.LandClaimOnlineDurabilityModifier }}{{ else }}4{{ end }}"/>				<!-- How much protected claim area block hardness is increased when a player is online. 0 means infinite (no damage will ever be taken). Default is 4x -->
+          	<property name="LandClaimOfflineDurabilityModifier"	value="{{ if ne $land.LandClaimOfflineDurabilityModifier nil }}{{ $land.LandClaimOfflineDurabilityModifier }}{{ else }}4{{ end }}"/>				<!-- How much protected claim area block hardness is increased when a player is offline. 0 means infinite (no damage will ever be taken). Default is 4x -->
+          	<property name="LandClaimOfflineDelay"			value="{{ if ne $land.LandClaimOfflineDelay nil }}{{ $land.LandClaimOfflineDelay }}{{ else }}0{{ end }}"/>					<!-- The number of minutes after a player logs out that the land claim area hardness transitions from online to offline. Default is 0 -->
+
+          	<property name="DynamicMeshEnabled"				value="{{ if ne $land.DynamicMeshEnabled nil }}{{ $land.DynamicMeshEnabled }}{{ else }}true{{ end }}"/>				<!-- Is Dynamic Mesh system enabled -->
+          	<property name="DynamicMeshLandClaimOnly"		value="{{ if ne $land.DynamicMeshLandClaimOnly nil }}{{ $land.DynamicMeshLandClaimOnly }}{{ else }}true{{ end }}"/>				<!-- Is Dynamic Mesh system only active in player LCB areas -->
+          	<property name="DynamicMeshLandClaimBuffer"		value="{{ if ne $land.DynamicMeshLandClaimBuffer nil }}{{ $land.DynamicMeshLandClaimBuffer }}{{ else }}3{{ end }}"/>					<!-- Dynamic Mesh LCB chunk radius -->
+          	<property name="DynamicMeshMaxItemCache"		value="{{ if ne $land.DynamicMeshMaxItemCache nil }}{{ $land.DynamicMeshMaxItemCache }}{{ else }}3{{ end }}"/>					<!-- How many items can be processed concurrently, higher values use more RAM -->
+
+          	<property name="TwitchServerPermission"			value="{{ if ne $land.TwitchServerPermission nil }}{{ $land.TwitchServerPermission }}{{ else }}90{{ end }}"/>				<!-- Required permission level to use twitch integration on the server -->
+          	<property name="TwitchBloodMoonAllowed"			value="{{ if ne $land.TwitchBloodMoonAllowed nil }}{{ $land.TwitchBloodMoonAllowed }}{{ else }}false{{ end }}"/>				<!-- If the server allows twitch actions during a blood moon. This could cause server lag with extra zombies being spawned during blood moon. -->
+
+          	<property name="SandboxCode"					value="{{ include "helm-7dtd.xmlEscape" (default "AAAJABJACJADJARFBNC" $land.SandboxCode) }}"/>	<!-- Currently set to the default difficulty of Adventurer. This code can be changed by starting the new game screen, clicking on the sandbox options button, adjusting the options, and then using the copy code button to paste it here. Code example: AAAJABJACJADJARFBNC -->
+
+          	<!-- There are several game settings that you cannot change when starting a new game. -->
+          	<!-- You can use console commands to change at least some of them in-game. -->
+          	<!-- setgamepref BedrollDeadZoneSize 30 -->
+          </ServerSettings>
+          EOF
+          } > /home/sdtdserver/serverfiles/sdtdserver.xml
+          chown {{ $puid }}:{{ $pgid }} /home/sdtdserver/serverfiles/sdtdserver.xml 2>/dev/null || true
+        volumeMounts:
+        {{- if and .Values.storage.server .Values.storage.server.kind }}
+        - mountPath: /home/sdtdserver/serverfiles
+          name: serverfiles
+        {{- end }}
       containers:
       - name: {{ .Release.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -197,30 +417,30 @@ spec:
         {{- end }}
         ports:
         - name: gameport-tcp
-          containerPort: {{ $gamePort }}
+          containerPort: {{ $serverPort }}
           protocol: TCP
         - name: gameport-udp
-          containerPort: {{ $gamePort }}
+          containerPort: {{ $serverPort }}
           protocol: UDP
         - name: gameport-udp2
-          containerPort: {{ add $gamePort 1 }}
+          containerPort: {{ add $serverPort 1 }}
           protocol: UDP
         - name: gameport-udp3
-          containerPort: {{ add $gamePort 2 }}
+          containerPort: {{ add $serverPort 2 }}
           protocol: UDP
-        {{- if and .Values.networking.webadmin .Values.networking.webadmin.enabled }}
+        {{- if or $webDashboardEnabled $netWebadmin.enabled }}
         - name: webadmin
-          containerPort: {{ default 8080 .Values.networking.webadmin.port | int }}
+          containerPort: {{ $webDashboardPort }}
           protocol: TCP
         {{- end }}
-        {{- if and .Values.networking.telnet .Values.networking.telnet.enabled }}
+        {{- if or $telnetEnabled $netTelnet.enabled }}
         - name: telnet
-          containerPort: {{ default 8081 .Values.networking.telnet.port | int }}
+          containerPort: {{ $telnetPort }}
           protocol: TCP
         {{- end }}
-        {{- if and .Values.networking.webserver .Values.networking.webserver.enabled }}
+        {{- if $netWebserver.enabled }}
         - name: webserver
-          containerPort: {{ default 8082 .Values.networking.webserver.port | int }}
+          containerPort: {{ default 8082 $netWebserver.port | int }}
           protocol: TCP
         {{- end }}
         volumeMounts:
